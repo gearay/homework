@@ -6,7 +6,6 @@ import natural from 'natural';
 import { MongoClient, ObjectId } from 'mongodb';
 import dotenv from 'dotenv';
 import path from 'path';
-import OpenAI from 'openai';
 import axios from 'axios';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -100,18 +99,18 @@ app.use(ensureDbConnected);
 // JWT中间件
 const authenticateToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
-    if (!token) {
+  if (!token) {
       return res.status(401).json({ 
         success: false,
         message: '请先登录' 
       });
-    }
+  }
 
-    try {
-      const user = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+  try {
+    const user = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
       // 验证用户是否存在
       const userExists = await db.collection('users').findOne({ 
         _id: new ObjectId(user.id) 
@@ -124,9 +123,9 @@ const authenticateToken = async (req, res, next) => {
         });
       }
       
-      req.user = user;
-      next();
-    } catch (error) {
+    req.user = user;
+    next();
+  } catch (error) {
       console.error('Token验证错误:', error);
       return res.status(401).json({ 
         success: false,
@@ -309,25 +308,60 @@ app.put('/user/api-keys', authenticateToken, async (req, res) => {
   try {
     const { provider, apiKey } = req.body;
     
+    if (!provider || !apiKey) {
+      return res.status(400).json({
+        success: false,
+        message: '提供商和API密钥不能为空'
+      });
+    }
+    
     // 验证提供商
-    const validProviders = Object.values(LLM_PROVIDERS);
+    const validProviders = ['deepseek', 'doubao'];
     if (!validProviders.includes(provider)) {
-      return res.status(400).json({ message: '不支持的LLM提供商' });
+      return res.status(400).json({
+        success: false,
+        message: '不支持的AI提供商'
+      });
     }
 
+    // 更新用户的API密钥
     const result = await db.collection('users').updateOne(
       { _id: new ObjectId(req.user.id) },
-      { $set: { [`apiKeys.${provider}`]: apiKey } }
+      { 
+        $set: { 
+          [`apiKeys.${provider}`]: apiKey,
+          updatedAt: new Date().toISOString()
+        }
+      }
     );
 
     if (result.matchedCount === 0) {
-      return res.status(404).json({ message: '用户不存在' });
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
     }
 
-    res.json({ message: 'API密钥更新成功' });
+    // 获取更新后的用户信息
+    const updatedUser = await db.collection('users').findOne(
+      { _id: new ObjectId(req.user.id) },
+      { projection: { apiKeys: 1 } }
+    );
+
+    res.json({
+      success: true,
+      message: 'API密钥更新成功',
+      data: {
+        apiKeys: updatedUser.apiKeys
+      }
+    });
   } catch (error) {
     console.error('更新API密钥错误:', error);
-    res.status(500).json({ message: '更新API密钥失败' });
+    res.status(500).json({
+      success: false,
+      message: 'API密钥更新失败，请重试',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -603,108 +637,263 @@ const processText = (text) => {
   return result;
 };
 
-// 处理文本请求
+// 处理文本和图片
 app.post('/process', authenticateToken, upload.single('file'), async (req, res) => {
   try {
-    let text = req.body.text;
-    const method = req.body.method;
-    const provider = req.body.provider;
+    const { text, method } = req.body;
+    const file = req.file;
 
-    // 验证处理方法
-    if (method !== 'nlp' && method !== 'api') {
-      throw new Error('无效的处理方法');
+    if (!text && !file) {
+      return res.status(400).json({
+        success: false,
+        message: '请提供文本或图片'
+      });
     }
 
-    // 如果是API处理方法，验证提供商并获取API密钥
-    if (method === 'api') {
-      // 验证提供商
-      const validProviders = Object.values(LLM_PROVIDERS);
-      if (!validProviders.includes(provider)) {
-        throw new Error('不支持的LLM提供商');
-      }
+    // 验证处理方法
+    if (method !== 'machine' && method !== 'api') {
+      return res.status(400).json({
+        success: false,
+        message: '无效的处理方法'
+      });
+    }
 
+    let content = text;
+    
+    // 如果有图片，使用OCR处理
+    if (file) {
+      const worker = await createWorker('chi_sim');
+      const { data: { text: ocrText } } = await worker.recognize(file.path);
+      await worker.terminate();
+      content = ocrText;
+    }
+
+    let result;
+    const now = new Date().toISOString();
+
+    if (method === 'machine') {
+      // 使用自然语言处理
+      result = await processWithNLP(content);
+    } else if (method === 'api') {
       // 获取用户的API密钥
       const user = await db.collection('users').findOne(
         { _id: new ObjectId(req.user.id) },
         { projection: { apiKeys: 1 } }
       );
 
+      const provider = req.body.provider || 'openai';
+
       if (!user || !user.apiKeys || !user.apiKeys[provider]) {
-        throw new Error(`请先设置${provider}的API密钥`);
+        return res.status(400).json({
+          success: false,
+          message: `请先在管理页面设置${provider}的API密钥`
+        });
       }
 
-      // 使用用户存储的API密钥
-      const apiKey = user.apiKeys[provider];
-
-      if (!text && !req.file) {
-        throw new Error('请提供文本或图片');
-      }
-
-      // 处理文本
-      let result;
-      switch (provider) {
-        case LLM_PROVIDERS.OPENAI:
-          result = await processWithGPT(text, apiKey);
-          break;
-        case LLM_PROVIDERS.DEEPSEEK:
-          result = await processWithDeepseek(text, apiKey);
-          break;
-        case LLM_PROVIDERS.DOUBAO:
-          result = await processWithDoubao(text, apiKey);
-          break;
-        default:
-          throw new Error('不支持的LLM提供商');
-      }
-
-      // 添加处理时间戳和提供商信息
-      result.processedAt = new Date().toISOString();
-      result.provider = provider;
-
-      // 保存处理结果
-      const resultDoc = {
-        userId: new ObjectId(req.user.id),
-        content: text,
-        processedResult: result,
-        createdAt: new Date()
-      };
-
-      await db.collection('results').insertOne(resultDoc);
-
-      res.json({
-        success: true,
-        data: result,
-        message: '处理成功'
-      });
-    } else {
-      // NLP处理
-      const result = processText(text);
-      result.processedAt = new Date().toISOString();
-      result.provider = 'nlp';
-
-      const resultDoc = {
-        userId: new ObjectId(req.user.id),
-        content: text,
-        processedResult: result,
-        createdAt: new Date()
-      };
-
-      await db.collection('results').insertOne(resultDoc);
-
-      res.json({
-        success: true,
-        data: result,
-        message: '处理成功'
-      });
+      // 使用用户存储的API密钥进行AI处理
+      result = await processWithAI(content, provider, user.apiKeys[provider]);
     }
+
+    // 添加处理时间和方法
+    result.processedAt = now;
+    result.provider = method === 'machine' ? 'machine' : req.body.provider;
+
+    res.json({
+      success: true,
+      message: '处理成功',
+      data: result
+    });
+
   } catch (error) {
     console.error('处理错误:', error);
     res.status(500).json({
       success: false,
-      error: error.message,
-      message: '处理失败，请检查输入和API密钥是否正确'
+      message: '处理失败，请检查输入和API密钥是否正确',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
+
+// NLP处理函数
+async function processWithNLP(content) {
+  try {
+    // 使用自然语言处理来提取信息
+    const tokenizer = new natural.WordTokenizer();
+    const tokens = tokenizer.tokenize(content);
+    
+    // 提取可能的日期信息
+    const datePattern = /(\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?)|(\d{1,2}[-/月]\d{1,2}日?)/g;
+    const dateMatches = content.match(datePattern);
+    let dueDate = null;
+    let dueDateConfidence = 0;
+    let dueDateOriginal = null;
+
+    if (dateMatches) {
+      dueDateOriginal = dateMatches[0];
+      // 简单的日期解析
+      const dateStr = dueDateMatches[0]
+        .replace(/年|月|日/g, '-')
+        .replace(/\/$/, '');
+      dueDate = new Date(dateStr);
+      if (!isNaN(dueDate)) {
+        dueDate = dueDate.toISOString();
+        dueDateConfidence = 0.8;
+      }
+    }
+
+    // 提取学科信息
+    const subjects = ['语文', '数学', '英语', '物理', '化学', '生物', '历史', '地理', '政治'];
+    let subject = '';
+    let confidence = 0.3;
+
+    for (const sub of subjects) {
+      if (content.includes(sub)) {
+        subject = sub;
+        confidence = 0.8;
+        break;
+      }
+    }
+
+    // 提取课程信息
+    const coursePattern = /课程[：:]\s*([^\n]+)/;
+    const courseMatch = content.match(coursePattern);
+    const course = courseMatch ? courseMatch[1].trim() : '';
+
+    return {
+      content,
+      subject,
+      course,
+      dueDate,
+      dueDateConfidence,
+      dueDateOriginal,
+      confidence,
+      suggestions: []
+    };
+  } catch (error) {
+    console.error('NLP处理错误:', error);
+    throw new Error('文本处理失败');
+  }
+}
+
+// AI API处理函数
+async function processWithAI(content, provider, apiKey) {
+  try {
+    let result = {
+      content,
+      subject: '',
+      course: '',
+      dueDate: null,
+      dueDateConfidence: 0,
+      dueDateOriginal: null,
+      confidence: 0.5,
+      suggestions: []
+    };
+
+    const systemPrompt = "你是一个专门处理作业信息的AI助手。请从文本中提取以下信息：学科、课程、截止日期。如果发现作业描述不清晰或有改进空间，请提供改进建议。";
+    const userPrompt = `请分析以下作业内容，并提取关键信息：
+${content}
+
+请按以下JSON格式返回结果（注意：所有字段都必须返回，如果没有相关信息则返回空值）：
+{
+  "subject": "学科名称",
+  "course": "课程名称",
+  "dueDate": "截止日期（YYYY-MM-DD格式）",
+  "dueDateConfidence": "日期识别的置信度（0-1之间的小数）",
+  "dueDateOriginal": "原始日期文本",
+  "confidence": "整体识别的置信度（0-1之间的小数）",
+  "suggestions": ["改进建议1", "改进建议2"]
+}`;
+
+    let aiResponse;
+    
+    // 根据不同的提供商调用相应的API
+      switch (provider) {
+      case 'deepseek':
+        const deepseekResponse = await axios.post(
+          'https://api.deepseek.com/v1/chat/completions',
+          {
+            model: "deepseek-chat",  // 使用默认的deepseek-chat模型
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 800,
+            stream: false
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            }
+          }
+        );
+
+        try {
+          const responseContent = deepseekResponse.data.choices[0].message.content;
+          console.log('Deepseek原始响应:', responseContent);
+          aiResponse = JSON.parse(responseContent);
+        } catch (parseError) {
+          console.error('Deepseek响应解析错误:', parseError);
+          console.log('原始响应:', deepseekResponse.data);
+          throw new Error('AI响应格式错误');
+        }
+          break;
+
+      case 'doubao':
+        const doubaoResponse = await axios.post(
+          'https://api.doubao.com/api/chat/completion',
+          {
+            model: "doubao-chat",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 800
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        aiResponse = JSON.parse(doubaoResponse.data.choices[0].message.content);
+          break;
+
+        default:
+        throw new Error('不支持的AI提供商');
+    }
+
+    // 验证并格式化AI响应
+    if (aiResponse) {
+      result = {
+        ...result,
+        subject: aiResponse.subject || '',
+        course: aiResponse.course || '',
+        dueDate: aiResponse.dueDate || null,
+        dueDateConfidence: parseFloat(aiResponse.dueDateConfidence) || 0,
+        dueDateOriginal: aiResponse.dueDateOriginal || null,
+        confidence: parseFloat(aiResponse.confidence) || 0.5,
+        suggestions: Array.isArray(aiResponse.suggestions) ? aiResponse.suggestions : []
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('AI处理错误:', error);
+    if (error.response) {
+      console.error('API响应错误:', {
+        status: error.response.status,
+        data: error.response.data
+      });
+    }
+    throw new Error(`AI处理失败: ${error.message}`);
+  }
+}
 
 // 获取用户的处理历史
 app.get('/results', authenticateToken, async (req, res) => {
@@ -732,8 +921,8 @@ app.get('/results', authenticateToken, async (req, res) => {
       updatedAt: result.updatedAt
     }));
 
-    res.json({
-      success: true,
+      res.json({
+        success: true,
       data: formattedResults
     });
   } catch (error) {
@@ -773,6 +962,8 @@ app.put('/results/:id', authenticateToken, async (req, res) => {
       });
     }
 
+    const now = new Date().toISOString();
+
     // 更新文档
     const result = await db.collection('results').updateOne(
       { 
@@ -789,8 +980,9 @@ app.put('/results/:id', authenticateToken, async (req, res) => {
           dueDateOriginal: updateData.dueDateOriginal,
           confidence: updateData.confidence,
           suggestions: updateData.suggestions || [],
-          provider: updateData.provider,
-          updatedAt: new Date()
+          provider: updateData.provider || existingRecord.provider,
+          processedAt: updateData.processedAt || existingRecord.processedAt || now,
+          updatedAt: now
         }
       }
     );
@@ -799,8 +991,8 @@ app.put('/results/:id', authenticateToken, async (req, res) => {
       throw new Error('更新失败');
     }
 
-    res.json({
-      success: true,
+      res.json({
+        success: true,
       message: '更新成功'
     });
   } catch (error) {
@@ -858,49 +1050,85 @@ app.delete('/results/:id', authenticateToken, async (req, res) => {
 // 保存处理结果
 app.post('/save', authenticateToken, async (req, res) => {
   try {
-    console.log('保存请求:', req.body);
+    console.log('保存请求开始，请求体:', JSON.stringify(req.body, null, 2));
     
     // 验证必要字段
-    const { content, subject, course, dueDate } = req.body;
+    const { content } = req.body;
     if (!content) {
+      console.log('内容为空，拒绝保存');
       return res.status(400).json({
         success: false,
         message: '内容不能为空'
       });
     }
 
-    // 创建保存文档
+    const now = new Date().toISOString();
+
+    // 准备保存的文档
     const resultDoc = {
       userId: new ObjectId(req.user.id),
-      content,
-      subject: subject || '',
-      course: course || '',
-      dueDate: dueDate || null,
-      dueDateConfidence: req.body.dueDateConfidence,
-      dueDateOriginal: req.body.dueDateOriginal,
-      confidence: req.body.confidence,
-      suggestions: req.body.suggestions || [],
-      provider: req.body.provider,
-      processedAt: req.body.processedAt || new Date().toISOString(),
-      createdAt: new Date(),
-      updatedAt: new Date()
+      content: req.body.content,
+      subject: req.body.subject || '',
+      course: req.body.course || '',
+      dueDate: req.body.dueDate || null,
+      dueDateConfidence: parseFloat(req.body.dueDateConfidence) || 0,
+      dueDateOriginal: req.body.dueDateOriginal || '',
+      confidence: parseFloat(req.body.confidence) || 0,
+      suggestions: Array.isArray(req.body.suggestions) ? req.body.suggestions : [],
+      provider: req.body.provider || 'machine',
+      processedAt: req.body.processedAt || now,
+      createdAt: now,
+      updatedAt: now
     };
+
+    console.log('准备保存的文档:', JSON.stringify(resultDoc, null, 2));
+
+    // 检查是否存在相同内容的记录
+    const existingRecord = await db.collection('results').findOne({
+      userId: new ObjectId(req.user.id),
+      content: content
+    });
+
+    if (existingRecord) {
+      console.log('找到已存在的记录:', existingRecord._id.toString());
+      return res.json({
+        success: true,
+        message: '记录已存在',
+        data: {
+          id: existingRecord._id,
+          processedAt: existingRecord.processedAt,
+          provider: existingRecord.provider
+        }
+      });
+    }
 
     // 保存到数据库
     const result = await db.collection('results').insertOne(resultDoc);
-    console.log('保存结果:', result);
+    console.log('数据库插入结果:', result);
 
-    if (result.acknowledged) {
-      res.json({
-        success: true,
-        message: '保存成功',
-        data: {
-          id: result.insertedId
-        }
-      });
-    } else {
-      throw new Error('保存失败');
+    if (!result.acknowledged) {
+      console.error('保存失败: 数据库未确认插入');
+      throw new Error('数据库插入未确认');
     }
+
+    const savedRecord = await db.collection('results').findOne({
+      _id: result.insertedId
+    });
+    console.log('已保存的记录:', savedRecord);
+
+    res.json({
+      success: true,
+      message: '保存成功',
+      data: {
+        id: result.insertedId,
+        processedAt: resultDoc.processedAt,
+        provider: resultDoc.provider,
+        content: resultDoc.content,
+        subject: resultDoc.subject,
+        course: resultDoc.course
+      }
+    });
+
   } catch (error) {
     console.error('保存错误:', error);
     console.error('错误详情:', {
