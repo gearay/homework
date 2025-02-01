@@ -19,6 +19,7 @@ interface ProcessedResult {
   suggestions?: string[]
   processedAt?: string
   provider?: string
+  id?: string
 }
 
 interface ApiResponse {
@@ -45,6 +46,13 @@ interface AuthResponse {
 // 添加API基础URL常量
 const API_BASE_URL = 'http://localhost:3000';
 
+// 添加导航页面枚举
+enum Page {
+  INPUT = 'input',
+  VIEW = 'view',
+  MANAGE = 'manage'
+}
+
 function App() {
   const [text, setText] = useState('')
   const [files, setFiles] = useState<File[]>([])
@@ -63,6 +71,7 @@ function App() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [results, setResults] = useState<ProcessedResult[]>([])
+  const [currentPage, setCurrentPage] = useState<Page>(Page.INPUT)
 
   // 检查登录状态
   useEffect(() => {
@@ -87,15 +96,24 @@ function App() {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
-      })
+      });
+      
       if (response.ok) {
-        const data = await response.json()
-        setResults(data)
+        const data = await response.json();
+        if (data.success && Array.isArray(data.data)) {
+          setResults(data.data);
+          console.log('获取历史记录成功:', data.data);
+        } else {
+          throw new Error(data.message || '获取历史记录失败');
+        }
+      } else {
+        throw new Error('获取历史记录失败');
       }
     } catch (error) {
-      console.error('获取历史记录失败:', error)
+      console.error('获取历史记录失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '获取历史记录失败，请重试');
     }
-  }
+  };
 
   const handleLogin = async () => {
     try {
@@ -321,39 +339,73 @@ function App() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('确定要删除这条记录吗？')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/results/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setErrorMessage('删除成功');
+        // 刷新列表
+        fetchResults();
+      } else {
+        throw new Error(data.message || '删除失败');
+      }
+    } catch (error) {
+      console.error('删除错误:', error);
+      setErrorMessage(error instanceof Error ? error.message : '删除失败，请重试');
+    }
+  };
+
   const handleSave = async () => {
-    if (!result) return
+    if (!result) return;
     
     try {
-      const response = await fetch(`${API_BASE_URL}/save`, {
-        method: 'POST',
+      const url = result.id ? 
+        `${API_BASE_URL}/results/${result.id}` : 
+        `${API_BASE_URL}/save`;
+
+      const method = result.id ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         },
         body: JSON.stringify(result)
-      })
+      });
       
-      const data = await response.json()
+      const data = await response.json();
       
       if (data.success) {
-        setErrorMessage('保存成功')
-        setIsEditing(false)
+        setErrorMessage(result.id ? '更新成功' : '保存成功');
+        setIsEditing(false);
         // 刷新历史记录
-        fetchResults()
+        fetchResults();
       } else {
-        throw new Error(data.message || '保存失败')
+        throw new Error(data.message || '保存失败');
       }
     } catch (error) {
-      console.error('保存错误:', error)
-      setErrorMessage(error instanceof Error ? error.message : '保存失败，请重试')
+      console.error('保存错误:', error);
+      setErrorMessage(error instanceof Error ? error.message : '保存失败，请重试');
     }
-  }
+  };
 
   return (
     <div className="container">
       <header className="header">
-        <h1 className="title">作业信息提取系统</h1>
+        <h1 className="title">作业信息系统</h1>
         <div className="auth-buttons">
           {!isLoggedIn ? (
             <>
@@ -375,307 +427,392 @@ function App() {
         </div>
       </header>
 
-      {showLoginForm && (
-        <div className="modal">
-          <div className="modal-content">
-            <h2>登录</h2>
-            <input
-              type="text"
-              placeholder="用户名"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <input
-              type="password"
-              placeholder="密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <div className="modal-buttons">
-              <button onClick={handleLogin}>登录</button>
-              <button onClick={() => setShowLoginForm(false)}>取消</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showRegisterForm && (
-        <div className="modal">
-          <div className="modal-content">
-            <h2>注册</h2>
-            <input
-              type="text"
-              placeholder="用户名"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-            <input
-              type="password"
-              placeholder="密码"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <div className="modal-buttons">
-              <button onClick={handleRegister}>注册</button>
-              <button onClick={() => setShowRegisterForm(false)}>取消</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isLoggedIn && (
-        <div className="api-keys-section">
-          <h3>API密钥管理</h3>
-          <div className="api-keys-grid">
-            {Object.values(LLMProvider).map((provider) => (
-              <div key={provider} className="api-key-item">
-                <label>{getProviderDisplayName(provider)} API Key:</label>
-                <input
-                  type="password"
-                  value={user?.apiKeys[provider] || ''}
-                  onChange={(e) => updateApiKey(provider, e.target.value)}
-                  placeholder={`输入${getProviderDisplayName(provider)} API Key`}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="input-section">
-        {errorMessage && (
-          <div className="error-message">
-            {errorMessage}
-          </div>
+      <div className="main-content">
+        {isLoggedIn && (
+          <nav className="navigation">
+            <button 
+              className={`nav-button ${currentPage === Page.INPUT ? 'active' : ''}`}
+              onClick={() => setCurrentPage(Page.INPUT)}
+              data-page="input"
+            >
+              📝 录入
+            </button>
+            <button 
+              className={`nav-button ${currentPage === Page.VIEW ? 'active' : ''}`}
+              onClick={() => setCurrentPage(Page.VIEW)}
+              data-page="view"
+            >
+              📋 查看
+            </button>
+            <button 
+              className={`nav-button ${currentPage === Page.MANAGE ? 'active' : ''}`}
+              onClick={() => setCurrentPage(Page.MANAGE)}
+              data-page="manage"
+            >
+              ⚙️ 管理
+            </button>
+          </nav>
         )}
-        
-        <div className="text-input">
-          <h3>文本输入</h3>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="请输入作业相关文本..."
-            className="text-area"
-          />
-        </div>
 
-        <div className="image-input">
-          <h3>图片上传</h3>
-          <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''}`}>
-            <input {...getInputProps()} />
-            {isDragActive ? (
-              <p>放开以上传图片...</p>
-            ) : (
-              <p>拖放图片到这里，或点击选择图片</p>
-            )}
-          </div>
-          {files.length > 0 && (
-            <div className="file-list">
-              <p>已选择: {files[0].name}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="processing-options">
-          <h3>处理方式</h3>
-          <div className="radio-group">
-            <label>
-              <input
-                type="radio"
-                checked={processingMethod === 'nlp'}
-                onChange={() => handleProcessingMethodChange('nlp')}
-              />
-              NLP处理
-            </label>
-            <label>
-              <input
-                type="radio"
-                checked={processingMethod === 'api'}
-                onChange={() => handleProcessingMethodChange('api')}
-              />
-              API处理
-            </label>
-          </div>
-
-          {processingMethod === 'api' && (
-            <div className="llm-provider-select">
-              <h4>选择LLM提供商</h4>
-              <select
-                value={llmProvider}
-                onChange={(e) => setLLMProvider(e.target.value as LLMProvider)}
-                className="provider-select"
-              >
-                <option value={LLMProvider.OPENAI}>OpenAI</option>
-                <option value={LLMProvider.DEEPSEEK}>Deepseek</option>
-                <option value={LLMProvider.DOUBAO}>豆包AI</option>
-              </select>
-            </div>
-          )}
-
-          {showApiKeyInput && (
-            <div className="api-key-input">
+        {showLoginForm && (
+          <div className="modal">
+            <div className="modal-content">
+              <h2>登录</h2>
               <input
                 type="text"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={`请输入${getProviderDisplayName(llmProvider)} API Key`}
-                className="api-key-field"
+                placeholder="用户名"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
               />
+              <input
+                type="password"
+                placeholder="密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <div className="modal-buttons">
+                <button onClick={handleLogin}>登录</button>
+                <button onClick={() => setShowLoginForm(false)}>取消</button>
+              </div>
             </div>
-          )}
-      </div>
+          </div>
+        )}
 
-        <button 
-          onClick={handleSubmit}
-          disabled={processing || (!text && files.length === 0)}
-          className="submit-button"
-        >
-          {processing ? '处理中...' : '开始处理'}
-        </button>
-      </div>
+        {showRegisterForm && (
+          <div className="modal">
+            <div className="modal-content">
+              <h2>注册</h2>
+              <input
+                type="text"
+                placeholder="用户名"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+              <input
+                type="password"
+                placeholder="密码"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <div className="modal-buttons">
+                <button onClick={handleRegister}>注册</button>
+                <button onClick={() => setShowRegisterForm(false)}>取消</button>
+              </div>
+            </div>
+          </div>
+        )}
 
-      {result && (
-        <div className="result-section">
-          <h3>处理结果</h3>
-          {isEditing ? (
-            <div className="result-edit">
-              <div className="form-group">
-                <label>作业内容:</label>
-                <textarea
-                  value={result.content}
-                  onChange={(e) => setResult({ ...result, content: e.target.value })}
-                />
-              </div>
-              <div className="form-group">
-                <label>学科:</label>
-                <input
-                  type="text"
-                  value={result.subject}
-                  onChange={(e) => setResult({ ...result, subject: e.target.value })}
-                />
-              </div>
-              <div className="form-group">
-                <label>课程:</label>
-                <input
-                  type="text"
-                  value={result.course}
-                  onChange={(e) => setResult({ ...result, course: e.target.value })}
-                />
-              </div>
-              <div className="form-group">
-                <label>截止日期:</label>
-                <div className="date-time-inputs">
-                  <input
-                    type="date"
-                    value={result.dueDate ? result.dueDate.split('T')[0] : ''}
-                    onChange={(e) => {
-                      const date = e.target.value;
-                      const time = result.dueDate ? result.dueDate.split('T')[1].split('.')[0] : '23:59:59';
-                      setResult({
-                        ...result,
-                        dueDate: `${date}T${time}`
-                      });
-                    }}
-                  />
-                  <input
-                    type="time"
-                    value={result.dueDate ? result.dueDate.split('T')[1].split('.')[0] : '23:59:59'}
-                    onChange={(e) => {
-                      const date = result.dueDate ? result.dueDate.split('T')[0] : new Date().toISOString().split('T')[0];
-                      setResult({
-                        ...result,
-                        dueDate: `${date}T${e.target.value}`
-                      });
-                    }}
-                  />
+        {isLoggedIn && (
+          <div className="page-content">
+            {currentPage === Page.INPUT && (
+              <div className="input-page">
+                <div className="input-section">
+                  {errorMessage && (
+                    <div className="error-message">
+                      {errorMessage}
+                    </div>
+                  )}
+                  
+                  <div className="text-input">
+                    <h3>文本输入</h3>
+                    <textarea
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      placeholder="请输入作业相关文本..."
+                      className="text-area"
+                    />
+                  </div>
+
+                  <div className="image-input">
+                    <h3>图片上传</h3>
+                    <div {...getRootProps()} className={`dropzone ${isDragActive ? 'active' : ''}`}>
+                      <input {...getInputProps()} />
+                      {isDragActive ? (
+                        <p>放开以上传图片...</p>
+                      ) : (
+                        <p>拖放图片到这里，或点击选择图片</p>
+                      )}
+                    </div>
+                    {files.length > 0 && (
+                      <div className="file-list">
+                        <p>已选择: {files[0].name}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="processing-options">
+                    <h3>处理方式</h3>
+                    <div className="radio-group">
+                      <label>
+                        <input
+                          type="radio"
+                          checked={processingMethod === 'nlp'}
+                          onChange={() => handleProcessingMethodChange('nlp')}
+                        />
+                        NLP处理
+                      </label>
+                      <label>
+                        <input
+                          type="radio"
+                          checked={processingMethod === 'api'}
+                          onChange={() => handleProcessingMethodChange('api')}
+                        />
+                        API处理
+                      </label>
+                    </div>
+
+                    {processingMethod === 'api' && (
+                      <div className="llm-provider-select">
+                        <h4>选择LLM提供商</h4>
+                        <select
+                          value={llmProvider}
+                          onChange={(e) => setLLMProvider(e.target.value as LLMProvider)}
+                          className="provider-select"
+                        >
+                          <option value={LLMProvider.OPENAI}>OpenAI</option>
+                          <option value={LLMProvider.DEEPSEEK}>Deepseek</option>
+                          <option value={LLMProvider.DOUBAO}>豆包AI</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {showApiKeyInput && (
+                      <div className="api-key-input">
+                        <input
+                          type="text"
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          placeholder={`请输入${getProviderDisplayName(llmProvider)} API Key`}
+                          className="api-key-field"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <button 
+                    onClick={handleSubmit}
+                    disabled={processing || (!text && files.length === 0)}
+                    className="submit-button"
+                  >
+                    {processing ? '处理中...' : '开始处理'}
+                  </button>
                 </div>
-                {result.dueDateOriginal && (
-                  <div className="date-info">
-                    <p>原始日期文本: {result.dueDateOriginal}</p>
-                    <p>日期识别置信度: {(result.dueDateConfidence || 0) * 100}%</p>
+
+                {result && (
+                  <div className="result-section">
+                    <h3>处理结果</h3>
+                    {isEditing ? (
+                      <div className="result-edit">
+                        <div className="form-group">
+                          <label>作业内容:</label>
+                          <textarea
+                            value={result.content}
+                            onChange={(e) => setResult({ ...result, content: e.target.value })}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>学科:</label>
+                          <input
+                            type="text"
+                            value={result.subject}
+                            onChange={(e) => setResult({ ...result, subject: e.target.value })}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>课程:</label>
+                          <input
+                            type="text"
+                            value={result.course}
+                            onChange={(e) => setResult({ ...result, course: e.target.value })}
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>截止日期:</label>
+                          <div className="date-time-inputs">
+                            <input
+                              type="date"
+                              value={result.dueDate ? result.dueDate.split('T')[0] : ''}
+                              onChange={(e) => {
+                                const date = e.target.value;
+                                const time = result.dueDate ? result.dueDate.split('T')[1].split('.')[0] : '23:59:59';
+                                setResult({
+                                  ...result,
+                                  dueDate: `${date}T${time}`
+                                });
+                              }}
+                            />
+                            <input
+                              type="time"
+                              value={result.dueDate ? result.dueDate.split('T')[1].split('.')[0] : '23:59:59'}
+                              onChange={(e) => {
+                                const date = result.dueDate ? result.dueDate.split('T')[0] : new Date().toISOString().split('T')[0];
+                                setResult({
+                                  ...result,
+                                  dueDate: `${date}T${e.target.value}`
+                                });
+                              }}
+                            />
+                          </div>
+                          {result.dueDateOriginal && (
+                            <div className="date-info">
+                              <p>原始日期文本: {result.dueDateOriginal}</p>
+                              <p>日期识别置信度: {(result.dueDateConfidence || 0) * 100}%</p>
+                            </div>
+                          )}
+                        </div>
+                        {result.confidence !== undefined && (
+                          <div className="confidence-info">
+                            <p>整体置信度: {(result.confidence * 100).toFixed(1)}%</p>
+                          </div>
+                        )}
+                        {result.suggestions && result.suggestions.length > 0 && (
+                          <div className="suggestions">
+                            <h4>改进建议:</h4>
+                            <ul>
+                              {result.suggestions.map((suggestion, index) => (
+                                <li key={index}>{suggestion}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {result.processedAt && (
+                          <div className="process-info">
+                            <p>处理时间: {new Date(result.processedAt).toLocaleString()}</p>
+                            <p>处理方式: {getProviderDisplayName(result.provider as LLMProvider)}</p>
+                          </div>
+                        )}
+                        <button onClick={handleSave} className="save-button">
+                          保存
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="result-display">
+                        <p><strong>作业内容:</strong> {result.content}</p>
+                        <p><strong>学科:</strong> {result.subject}</p>
+                        <p><strong>课程:</strong> {result.course}</p>
+                        <p><strong>截止日期:</strong> {result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</p>
+                        {result.dueDateOriginal && (
+                          <p><strong>原始日期文本:</strong> {result.dueDateOriginal}</p>
+                        )}
+                        {result.dueDateConfidence !== undefined && (
+                          <p><strong>日期识别置信度:</strong> {(result.dueDateConfidence * 100).toFixed(1)}%</p>
+                        )}
+                        {result.confidence !== undefined && (
+                          <p><strong>整体置信度:</strong> {(result.confidence * 100).toFixed(1)}%</p>
+                        )}
+                        {result.suggestions && result.suggestions.length > 0 && (
+                          <div>
+                            <strong>改进建议:</strong>
+                            <ul>
+                              {result.suggestions.map((suggestion, index) => (
+                                <li key={index}>{suggestion}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {result.processedAt && (
+                          <div>
+                            <p><strong>处理时间:</strong> {new Date(result.processedAt).toLocaleString()}</p>
+                            <p><strong>处理方式:</strong> {getProviderDisplayName(result.provider as LLMProvider)}</p>
+                          </div>
+                        )}
+                        <button onClick={() => setIsEditing(true)} className="edit-button">
+                          编辑
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-              {result.confidence !== undefined && (
-                <div className="confidence-info">
-                  <p>整体置信度: {(result.confidence * 100).toFixed(1)}%</p>
-                </div>
-              )}
-              {result.suggestions && result.suggestions.length > 0 && (
-                <div className="suggestions">
-                  <h4>改进建议:</h4>
-                  <ul>
-                    {result.suggestions.map((suggestion, index) => (
-                      <li key={index}>{suggestion}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {result.processedAt && (
-                <div className="process-info">
-                  <p>处理时间: {new Date(result.processedAt).toLocaleString()}</p>
-                  <p>处理方式: {getProviderDisplayName(result.provider as LLMProvider)}</p>
-                </div>
-              )}
-              <button onClick={handleSave} className="save-button">
-                保存
-              </button>
-            </div>
-          ) : (
-            <div className="result-display">
-              <p><strong>作业内容:</strong> {result.content}</p>
-              <p><strong>学科:</strong> {result.subject}</p>
-              <p><strong>课程:</strong> {result.course}</p>
-              <p><strong>截止日期:</strong> {result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</p>
-              {result.dueDateOriginal && (
-                <p><strong>原始日期文本:</strong> {result.dueDateOriginal}</p>
-              )}
-              {result.dueDateConfidence !== undefined && (
-                <p><strong>日期识别置信度:</strong> {(result.dueDateConfidence * 100).toFixed(1)}%</p>
-              )}
-              {result.confidence !== undefined && (
-                <p><strong>整体置信度:</strong> {(result.confidence * 100).toFixed(1)}%</p>
-              )}
-              {result.suggestions && result.suggestions.length > 0 && (
-                <div>
-                  <strong>改进建议:</strong>
-                  <ul>
-                    {result.suggestions.map((suggestion, index) => (
-                      <li key={index}>{suggestion}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {result.processedAt && (
-                <div>
-                  <p><strong>处理时间:</strong> {new Date(result.processedAt).toLocaleString()}</p>
-                  <p><strong>处理方式:</strong> {getProviderDisplayName(result.provider as LLMProvider)}</p>
-                </div>
-              )}
-              <button onClick={() => setIsEditing(true)} className="edit-button">
-                编辑
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+            )}
 
-      {results.length > 0 && (
-        <div className="history-section">
-          <h3>历史记录</h3>
-          <div className="history-list">
-            {results.map((result, index) => (
-              <div key={index} className="history-item">
-                <p><strong>内容:</strong> {result.content}</p>
-                <p><strong>学科:</strong> {result.subject}</p>
-                <p><strong>课程:</strong> {result.course}</p>
-                <p><strong>截止日期:</strong> {result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</p>
-                <p><strong>处理时间:</strong> {result.processedAt ? new Date(result.processedAt).toLocaleString() : '未知'}</p>
+            {currentPage === Page.VIEW && (
+              <div className="view-page">
+                <h2>作业记录</h2>
+                {errorMessage && (
+                  <div className="error-message">
+                    {errorMessage}
+                  </div>
+                )}
+                {results.length === 0 ? (
+                  <div className="empty-message">
+                    暂无作业记录
+                  </div>
+                ) : (
+                  <div className="homework-table">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>作业内容</th>
+                          <th>学科</th>
+                          <th>课程</th>
+                          <th>截止日期</th>
+                          <th>处理时间</th>
+                          <th>处理方式</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {results.map((result) => (
+                          <tr key={result.id}>
+                            <td>{result.content}</td>
+                            <td>{result.subject}</td>
+                            <td>{result.course}</td>
+                            <td>{result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</td>
+                            <td>{result.processedAt ? new Date(result.processedAt).toLocaleString() : '未知'}</td>
+                            <td>{result.provider ? getProviderDisplayName(result.provider as LLMProvider) : 'NLP'}</td>
+                            <td>
+                              <div className="action-buttons">
+                                <button 
+                                  onClick={() => {
+                                    setResult(result);
+                                    setIsEditing(true);
+                                    setCurrentPage(Page.INPUT);
+                                  }}
+                                  className="edit-button"
+                                >
+                                  编辑
+                                </button>
+                                <button 
+                                  onClick={() => result.id && handleDelete(result.id)}
+                                  className="delete-button"
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            ))}
+            )}
+
+            {currentPage === Page.MANAGE && (
+              <div className="manage-page">
+                <div className="api-keys-section">
+                  <h3>API密钥管理</h3>
+                  <div className="api-keys-grid">
+                    {Object.values(LLMProvider).map((provider) => (
+                      <div key={provider} className="api-key-item">
+                        <label>{getProviderDisplayName(provider)} API Key:</label>
+                        <input
+                          type="password"
+                          value={user?.apiKeys[provider] || ''}
+                          onChange={(e) => updateApiKey(provider, e.target.value)}
+                          placeholder={`输入${getProviderDisplayName(provider)} API Key`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

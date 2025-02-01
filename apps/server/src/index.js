@@ -715,10 +715,143 @@ app.get('/results', authenticateToken, async (req, res) => {
       .limit(50)
       .toArray();
 
-    res.json(results);
+    // 格式化返回的数据
+    const formattedResults = results.map(result => ({
+      id: result._id,
+      content: result.content,
+      subject: result.subject,
+      course: result.course,
+      dueDate: result.dueDate,
+      dueDateConfidence: result.dueDateConfidence,
+      dueDateOriginal: result.dueDateOriginal,
+      confidence: result.confidence,
+      suggestions: result.suggestions,
+      provider: result.provider,
+      processedAt: result.processedAt,
+      createdAt: result.createdAt,
+      updatedAt: result.updatedAt
+    }));
+
+    res.json({
+      success: true,
+      data: formattedResults
+    });
   } catch (error) {
     console.error('获取历史记录错误:', error);
-    res.status(500).json({ message: '获取历史记录失败' });
+    res.status(500).json({ 
+      success: false,
+      message: '获取历史记录失败' 
+    });
+  }
+});
+
+// 更新作业记录
+app.put('/results/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    // 验证必要字段
+    const { content, subject, course, dueDate } = updateData;
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        message: '内容不能为空'
+      });
+    }
+
+    // 验证记录所有权
+    const existingRecord = await db.collection('results').findOne({
+      _id: new ObjectId(id),
+      userId: new ObjectId(req.user.id)
+    });
+
+    if (!existingRecord) {
+      return res.status(404).json({
+        success: false,
+        message: '记录不存在或无权访问'
+      });
+    }
+
+    // 更新文档
+    const result = await db.collection('results').updateOne(
+      { 
+        _id: new ObjectId(id),
+        userId: new ObjectId(req.user.id)
+      },
+      { 
+        $set: {
+          content,
+          subject: subject || '',
+          course: course || '',
+          dueDate: dueDate || null,
+          dueDateConfidence: updateData.dueDateConfidence,
+          dueDateOriginal: updateData.dueDateOriginal,
+          confidence: updateData.confidence,
+          suggestions: updateData.suggestions || [],
+          provider: updateData.provider,
+          updatedAt: new Date()
+        }
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      throw new Error('更新失败');
+    }
+
+    res.json({
+      success: true,
+      message: '更新成功'
+    });
+  } catch (error) {
+    console.error('更新错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '更新失败，请重试',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// 删除作业记录
+app.delete('/results/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 验证记录所有权
+    const existingRecord = await db.collection('results').findOne({
+      _id: new ObjectId(id),
+      userId: new ObjectId(req.user.id)
+    });
+
+    if (!existingRecord) {
+      return res.status(404).json({
+        success: false,
+        message: '记录不存在或无权访问'
+      });
+    }
+
+    // 删除文档
+    const result = await db.collection('results').deleteOne({
+      _id: new ObjectId(id),
+      userId: new ObjectId(req.user.id)
+    });
+
+    if (result.deletedCount === 0) {
+      throw new Error('删除失败');
+    }
+
+    res.json({
+      success: true,
+      message: '删除成功'
+    });
+  } catch (error) {
+    console.error('删除错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '删除失败，请重试',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
