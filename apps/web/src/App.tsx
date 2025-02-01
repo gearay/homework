@@ -118,6 +118,8 @@ function App() {
         setUsername('')
         setPassword('')
         setErrorMessage(null)
+        // 登录成功后立即获取历史记录
+        await fetchResults()
       } else {
         setErrorMessage(data.message || '登录失败')
       }
@@ -223,54 +225,101 @@ function App() {
     }
   };
 
+  // 检查令牌是否过期
+  const checkTokenExpiration = () => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        const base64Url = token.split('.')[1];
+        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+
+        const { exp } = JSON.parse(jsonPayload);
+        if (exp * 1000 < Date.now()) {
+          // 令牌已过期，清除登录状态
+          handleLogout();
+          setErrorMessage('登录已过期，请重新登录');
+          return false;
+        }
+        return true;
+      } catch (error) {
+        console.error('令牌解析错误:', error);
+        handleLogout();
+        return false;
+      }
+    }
+    return false;
+  };
+
   const handleSubmit = async () => {
-    if (!text && files.length === 0) return
+    if (!text && files.length === 0) return;
     if (processingMethod === 'api' && !isLoggedIn) {
-      setErrorMessage('请先登录')
-      return
+      setErrorMessage('请先登录');
+      return;
     }
     
-    setProcessing(true)
-    setErrorMessage(null)
+    // 检查令牌是否过期
+    if (!checkTokenExpiration()) {
+      return;
+    }
+    
+    setProcessing(true);
+    setErrorMessage(null);
     try {
-      const formData = new FormData()
+      const formData = new FormData();
       if (text) {
-        formData.append('text', text)
+        formData.append('text', text);
       }
       if (files.length > 0) {
-        formData.append('file', files[0])
+        formData.append('file', files[0]);
       }
-      formData.append('method', processingMethod)
+      formData.append('method', processingMethod);
       if (apiKey) {
-        formData.append('apiKey', apiKey)
+        formData.append('apiKey', apiKey);
       }
       if (processingMethod === 'api') {
-        formData.append('provider', llmProvider)
+        formData.append('provider', llmProvider);
+      }
+
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('请先登录');
       }
 
       const response = await fetch(`${API_BASE_URL}/process`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: formData
-      })
+      });
 
-      const result: ApiResponse = await response.json()
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (response.status === 401) {
+          handleLogout();
+          throw new Error('登录已过期，请重新登录');
+        }
+        throw new Error(errorData.message || '处理失败');
+      }
+
+      const result = await response.json();
       
       if (!result.success) {
-        throw new Error(result.message || '处理失败')
+        throw new Error(result.message || '处理失败');
       }
       
-      setResult(result.data || null)
-      setIsEditing(true)
-      fetchResults() // 刷新历史记录
+      setResult(result.data || null);
+      setIsEditing(true);
+      fetchResults();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '处理失败，请重试')
+      setErrorMessage(error instanceof Error ? error.message : '处理失败，请重试');
     } finally {
-      setProcessing(false)
+      setProcessing(false);
     }
-  }
+  };
 
   const handleSave = async () => {
     if (!result) return
@@ -285,12 +334,19 @@ function App() {
         body: JSON.stringify(result)
       })
       
-      if (response.ok) {
-        alert('保存成功')
+      const data = await response.json()
+      
+      if (data.success) {
+        setErrorMessage('保存成功')
         setIsEditing(false)
+        // 刷新历史记录
+        fetchResults()
+      } else {
+        throw new Error(data.message || '保存失败')
       }
     } catch (error) {
-      alert('保存失败，请重试')
+      console.error('保存错误:', error)
+      setErrorMessage(error instanceof Error ? error.message : '保存失败，请重试')
     }
   }
 

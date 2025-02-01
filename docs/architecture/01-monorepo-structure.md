@@ -17,7 +17,7 @@ Adopt monorepo structure with following layout:
 .
 ├── apps/
 │   ├── web/          # Frontend application
-│   └── api/          # Backend service
+│   └── server/          # Backend service
 ├── packages/
 │   ├── core/         # Shared types/interfaces
 │   └── config/       # Build configurations

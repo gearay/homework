@@ -28,26 +28,50 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // MongoDB连接
-const mongoClient = new MongoClient(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017');
+const mongoClient = new MongoClient(process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017', {
+  connectTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+});
 let db;
 
 async function connectDB() {
   try {
     console.log('正在连接到MongoDB...');
+    console.log('连接URL:', process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017');
     await mongoClient.connect();
     console.log('MongoDB连接成功');
     
     db = mongoClient.db('homework_system');
     console.log('已选择数据库:', db.databaseName);
     
+    // 测试数据库连接
+    await db.command({ ping: 1 });
+    console.log('数据库连接测试成功');
+    
     // 创建必要的索引
     console.log('创建索引...');
     await db.collection('users').createIndex({ username: 1 }, { unique: true });
     await db.collection('results').createIndex({ userId: 1 });
     console.log('索引创建完成');
+
+    // 检查users集合是否存在
+    const collections = await db.listCollections().toArray();
+    const hasUsers = collections.some(col => col.name === 'users');
+    console.log('users集合状态:', hasUsers ? '已存在' : '不存在');
+    
+    if (!hasUsers) {
+      await db.createCollection('users');
+      console.log('users集合已创建');
+    }
   } catch (error) {
-    console.error('MongoDB连接失败:', error);
-    process.exit(1); // 如果数据库连接失败，终止程序
+    console.error('MongoDB连接错误:', error);
+    console.error('错误详情:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    process.exit(1);
   }
 }
 
@@ -75,19 +99,46 @@ app.use(ensureDbConnected);
 
 // JWT中间件
 const authenticateToken = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ message: '未提供认证令牌' });
-  }
-
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    req.user = user;
-    next();
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+      return res.status(401).json({ 
+        success: false,
+        message: '请先登录' 
+      });
+    }
+
+    try {
+      const user = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+      // 验证用户是否存在
+      const userExists = await db.collection('users').findOne({ 
+        _id: new ObjectId(user.id) 
+      });
+      
+      if (!userExists) {
+        return res.status(401).json({ 
+          success: false,
+          message: '用户不存在' 
+        });
+      }
+      
+      req.user = user;
+      next();
+    } catch (error) {
+      console.error('Token验证错误:', error);
+      return res.status(401).json({ 
+        success: false,
+        message: '无效的认证令牌' 
+      });
+    }
   } catch (error) {
-    return res.status(403).json({ message: '无效的认证令牌' });
+    console.error('认证中间件错误:', error);
+    return res.status(500).json({ 
+      success: false,
+      message: '服务器错误' 
+    });
   }
 };
 
@@ -178,17 +229,28 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { username, password } = req.body;
+    console.log('登录请求:', { username });
 
     // 查找用户
     const user = await db.collection('users').findOne({ username });
+    console.log('查找用户结果:', user ? '用户存在' : '用户不存在');
+    
     if (!user) {
-      return res.status(401).json({ message: '用户名或密码错误' });
+      return res.status(401).json({ 
+        success: false,
+        message: '用户名或密码错误' 
+      });
     }
 
     // 验证密码
     const validPassword = await bcrypt.compare(password, user.password);
+    console.log('密码验证结果:', validPassword ? '密码正确' : '密码错误');
+    
     if (!validPassword) {
-      return res.status(401).json({ message: '用户名或密码错误' });
+      return res.status(401).json({ 
+        success: false,
+        message: '用户名或密码错误' 
+      });
     }
 
     // 生成JWT令牌
@@ -200,6 +262,7 @@ app.post('/auth/login', async (req, res) => {
 
     // 返回用户信息和API密钥
     res.json({
+      success: true,
       token,
       user: {
         username: user.username,
@@ -208,7 +271,17 @@ app.post('/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error('登录错误:', error);
-    res.status(500).json({ message: '登录失败' });
+    console.error('错误详情:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    res.status(500).json({ 
+      success: false,
+      message: '登录失败，请重试',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -646,6 +719,68 @@ app.get('/results', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('获取历史记录错误:', error);
     res.status(500).json({ message: '获取历史记录失败' });
+  }
+});
+
+// 保存处理结果
+app.post('/save', authenticateToken, async (req, res) => {
+  try {
+    console.log('保存请求:', req.body);
+    
+    // 验证必要字段
+    const { content, subject, course, dueDate } = req.body;
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        message: '内容不能为空'
+      });
+    }
+
+    // 创建保存文档
+    const resultDoc = {
+      userId: new ObjectId(req.user.id),
+      content,
+      subject: subject || '',
+      course: course || '',
+      dueDate: dueDate || null,
+      dueDateConfidence: req.body.dueDateConfidence,
+      dueDateOriginal: req.body.dueDateOriginal,
+      confidence: req.body.confidence,
+      suggestions: req.body.suggestions || [],
+      provider: req.body.provider,
+      processedAt: req.body.processedAt || new Date().toISOString(),
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    // 保存到数据库
+    const result = await db.collection('results').insertOne(resultDoc);
+    console.log('保存结果:', result);
+
+    if (result.acknowledged) {
+      res.json({
+        success: true,
+        message: '保存成功',
+        data: {
+          id: result.insertedId
+        }
+      });
+    } else {
+      throw new Error('保存失败');
+    }
+  } catch (error) {
+    console.error('保存错误:', error);
+    console.error('错误详情:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    res.status(500).json({
+      success: false,
+      message: '保存失败，请重试',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
