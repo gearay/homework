@@ -58,13 +58,11 @@ function App() {
   const [files, setFiles] = useState<File[]>([])
   const [processing, setProcessing] = useState(false)
   const [processingMethod, setProcessingMethod] = useState<'nlp' | 'api'>('nlp')
-  const [apiKey, setApiKey] = useState('')
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false)
   const [result, setResult] = useState<ProcessedResult | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
-  const [llmProvider, setLLMProvider] = useState<LLMProvider>(LLMProvider.OPENAI)
+  const [llmProvider, setLLMProvider] = useState<LLMProvider>(LLMProvider.DEEPSEEK)
   const [user, setUser] = useState<User | null>(null)
   const [showLoginForm, setShowLoginForm] = useState(false)
   const [showRegisterForm, setShowRegisterForm] = useState(false)
@@ -227,7 +225,9 @@ function App() {
 
   const handleProcessingMethodChange = (method: 'nlp' | 'api') => {
     setProcessingMethod(method)
-    setShowApiKeyInput(method === 'api' && !isLoggedIn)
+    if (method === 'api') {
+      setLLMProvider(LLMProvider.DEEPSEEK)
+    }
   }
 
   const getProviderDisplayName = (provider: LLMProvider) => {
@@ -272,72 +272,80 @@ function App() {
   };
 
   const handleSubmit = async () => {
-    if (!text && files.length === 0) return;
-    if (processingMethod === 'api' && !isLoggedIn) {
-      setErrorMessage('请先登录');
-      return;
+    if (!text && files.length === 0) {
+      setErrorMessage('请输入文本或上传图片')
+      return
     }
-    
-    // 检查令牌是否过期
-    if (!checkTokenExpiration()) {
-      return;
-    }
-    
-    setProcessing(true);
-    setErrorMessage(null);
-    try {
-      const formData = new FormData();
-      if (text) {
-        formData.append('text', text);
-      }
-      if (files.length > 0) {
-        formData.append('file', files[0]);
-      }
-      formData.append('method', processingMethod);
-      if (apiKey) {
-        formData.append('apiKey', apiKey);
-      }
-      if (processingMethod === 'api') {
-        formData.append('provider', llmProvider);
-      }
 
-      const token = localStorage.getItem('token');
+    if (processingMethod === 'api' && !user?.apiKeys?.[llmProvider]) {
+      setErrorMessage(`请先在管理页面设置${getProviderDisplayName(llmProvider)}的API Key`)
+      return
+    }
+
+    setProcessing(true)
+    setErrorMessage(null)
+
+    const formData = new FormData()
+    if (text) {
+      formData.append('text', text)
+    }
+    if (files.length > 0) {
+      formData.append('file', files[0])
+    }
+    
+    formData.append('userId', user?.username || '')
+    formData.append('method', processingMethod)
+    if (processingMethod === 'api') {
+      formData.append('provider', llmProvider)
+      formData.append('apiKey', user?.apiKeys?.[llmProvider] || '')
+    }
+
+    try {
+      console.log('Processing request:', {
+        method: processingMethod,
+        provider: processingMethod === 'api' ? llmProvider : undefined,
+        hasText: !!text,
+        hasFile: files.length > 0,
+        userId: user?.username,
+        apiKey: user?.apiKeys?.[llmProvider] ? '已设置' : '未设置'
+      })
+
+      const token = localStorage.getItem('token')
       if (!token) {
-        throw new Error('请先登录');
+        throw new Error('未登录状态')
       }
 
       const response = await fetch(`${API_BASE_URL}/process`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          // 不要设置 'Content-Type'，因为使用了 FormData，浏览器会自动设置正确的 Content-Type
         },
         body: formData
-      });
+      })
 
       if (!response.ok) {
-        const errorData = await response.json();
-        if (response.status === 401) {
-          handleLogout();
-          throw new Error('登录已过期，请重新登录');
-        }
-        throw new Error(errorData.message || '处理失败');
+        const errorData = await response.json()
+        console.error('处理失败:', errorData)
+        throw new Error(errorData.message || '处理失败')
       }
 
-      const result = await response.json();
-      
-      if (!result.success) {
-        throw new Error(result.message || '处理失败');
+      const data = await response.json()
+      console.log('Processing response:', data)
+
+      if (data.success) {
+        setResult(data.data)
+        setIsEditing(true)
+      } else {
+        throw new Error(data.message || '处理失败')
       }
-      
-      setResult(result.data || null);
-      setIsEditing(true);
-      fetchResults();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '处理失败，请重试');
+      console.error('Error:', error)
+      setErrorMessage(error instanceof Error ? error.message : '处理失败，请检查输入和API密钥是否正确')
     } finally {
-      setProcessing(false);
+      setProcessing(false)
     }
-  };
+  }
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('确定要删除这条记录吗？')) {
@@ -389,10 +397,28 @@ function App() {
       const data = await response.json();
       
       if (data.success) {
+        // 更新结果的ID（如果是新保存的记录）
+        if (!result.id && data.data?.id) {
+          setResult({...result, id: data.data.id});
+        }
+        
         setErrorMessage(result.id ? '更新成功' : '保存成功');
         setIsEditing(false);
-        // 刷新历史记录
-        fetchResults();
+        
+        // 手动更新结果列表，而不是重新获取
+        if (result.id) {
+          // 更新现有记录
+          setResults(prevResults => 
+            prevResults.map(r => 
+              r.id === result.id ? {...result} : r
+            )
+          );
+        } else {
+          // 添加新记录
+          setResults(prevResults => 
+            [{...result, id: data.data?.id}, ...prevResults]
+          );
+        }
       } else {
         throw new Error(data.message || '保存失败');
       }
@@ -569,22 +595,9 @@ function App() {
                           onChange={(e) => setLLMProvider(e.target.value as LLMProvider)}
                           className="provider-select"
                         >
-                          <option value={LLMProvider.OPENAI}>OpenAI</option>
                           <option value={LLMProvider.DEEPSEEK}>Deepseek</option>
                           <option value={LLMProvider.DOUBAO}>豆包AI</option>
                         </select>
-                      </div>
-                    )}
-
-                    {showApiKeyInput && (
-                      <div className="api-key-input">
-                        <input
-                          type="text"
-                          value={apiKey}
-                          onChange={(e) => setApiKey(e.target.value)}
-                          placeholder={`请输入${getProviderDisplayName(llmProvider)} API Key`}
-                          className="api-key-field"
-                        />
                       </div>
                     )}
                   </div>
