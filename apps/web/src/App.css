@@ -713,17 +713,24 @@ button:focus-visible {
 .action-buttons {
   display: flex;
   gap: 8px;
-  justify-content: flex-start;
+  justify-content: center;
+  align-items: center;
+  min-width: 140px;
 }
 
 .action-buttons button {
-  padding: 4px 8px;
+  width: 60px;
+  height: 32px;
   font-size: 14px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.3s ease;
-  min-width: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
 }
 
 .action-buttons .edit-button {
@@ -742,6 +749,13 @@ button:focus-visible {
 
 .action-buttons .delete-button:hover {
   background-color: #c82333;
+}
+
+/* 表格操作列样式 */
+.homework-table td:last-child {
+  text-align: center;
+  padding: 8px 15px;
+  min-width: 140px;
 }
 
 /* 表格单元格样式优化 */
