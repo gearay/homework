@@ -569,6 +569,30 @@ function App() {
     }
   };
 
+  // 修改用户密码
+  const changePassword = async (oldPassword: string, newPassword: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/user/change-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ oldPassword, newPassword })
+      });
+
+      if (response.ok) {
+        setErrorMessage('密码修改成功');
+      } else {
+        const data = await response.json();
+        throw new Error(data.message || '密码修改失败');
+      }
+    } catch (error) {
+      console.error('密码修改失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '密码修改失败');
+    }
+  };
+
   // 渲染用户管理界面
   const renderUserManagement = () => {
     if (!user) return null;
@@ -590,6 +614,86 @@ function App() {
                 />
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* 账号管理部分 - 所有用户都可见 */}
+        <div className="manage-section">
+          <h2>账号管理</h2>
+          <div className="account-info">
+            <div className="info-item">
+              <label>用户名:</label>
+              <span>{user.username}</span>
+            </div>
+            <div className="info-item">
+              <label>账号创建时间:</label>
+              <span>{new Date(user.createdAt).toLocaleString()}</span>
+            </div>
+            <div className="info-item">
+              <label>最后登录时间:</label>
+              <span>{user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : '首次登录'}</span>
+            </div>
+            <div className="password-change-section">
+              <h3>修改密码</h3>
+              <div className="password-form">
+                <div className="form-group">
+                  <label>当前密码:</label>
+                  <input
+                    type="password"
+                    id="oldPassword"
+                    placeholder="请输入当前密码"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>新密码:</label>
+                  <input
+                    type="password"
+                    id="newPassword"
+                    placeholder="请输入新密码（至少6个字符）"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>确认新密码:</label>
+                  <input
+                    type="password"
+                    id="confirmPassword"
+                    placeholder="请再次输入新密码"
+                  />
+                </div>
+                <button
+                  className="change-password-button"
+                  onClick={() => {
+                    const oldPassword = (document.getElementById('oldPassword') as HTMLInputElement).value;
+                    const newPassword = (document.getElementById('newPassword') as HTMLInputElement).value;
+                    const confirmPassword = (document.getElementById('confirmPassword') as HTMLInputElement).value;
+
+                    if (!oldPassword || !newPassword || !confirmPassword) {
+                      setErrorMessage('请填写所有密码字段');
+                      return;
+                    }
+
+                    if (newPassword.length < 6) {
+                      setErrorMessage('新密码长度不能少于6个字符');
+                      return;
+                    }
+
+                    if (newPassword !== confirmPassword) {
+                      setErrorMessage('两次输入的新密码不一致');
+                      return;
+                    }
+
+                    changePassword(oldPassword, newPassword);
+                    
+                    // 清空输入框
+                    (document.getElementById('oldPassword') as HTMLInputElement).value = '';
+                    (document.getElementById('newPassword') as HTMLInputElement).value = '';
+                    (document.getElementById('confirmPassword') as HTMLInputElement).value = '';
+                  }}
+                >
+                  修改密码
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 

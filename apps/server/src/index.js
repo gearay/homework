@@ -1379,6 +1379,71 @@ app.post('/save', authenticateToken, async (req, res) => {
   }
 });
 
+// 修改用户密码
+app.post('/user/change-password', authenticateToken, async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    
+    // 验证新密码长度
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: '新密码长度不能少于6个字符'
+      });
+    }
+
+    // 获取用户信息
+    const user = await db.collection('users').findOne({
+      _id: new ObjectId(req.user.id)
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
+    // 验证旧密码
+    const validPassword = await bcrypt.compare(oldPassword, user.password);
+    if (!validPassword) {
+      return res.status(401).json({
+        success: false,
+        message: '当前密码错误'
+      });
+    }
+
+    // 加密新密码
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // 更新密码
+    const result = await db.collection('users').updateOne(
+      { _id: new ObjectId(req.user.id) },
+      { 
+        $set: { 
+          password: hashedPassword,
+          updatedAt: new Date().toISOString()
+        } 
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      throw new Error('更新密码失败');
+    }
+
+    res.json({
+      success: true,
+      message: '密码修改成功'
+    });
+  } catch (error) {
+    console.error('修改密码错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '修改密码失败，请重试'
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`服务器运行在端口 ${PORT}`);
