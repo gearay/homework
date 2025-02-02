@@ -20,6 +20,15 @@ interface ProcessedResult {
   processedAt?: string
   provider?: string
   id?: string
+  status: string
+  isCompleted: boolean
+  completedAt: string | null
+  score: number | null
+  difficulty: string
+  timeSpent: number | null
+  category: string
+  createdAt: string
+  updatedAt: string
 }
 
 interface ApiResponse {
@@ -1115,20 +1124,38 @@ function App() {
                           <th>学科</th>
                           <th>课程</th>
                           <th>截止日期</th>
-                          <th>处理时间</th>
+                          <th>难度</th>
+                          <th>状态</th>
+                          <th>分数</th>
+                          <th>用时</th>
                           <th>处理方式</th>
+                          <th>创建时间</th>
                           <th>操作</th>
                         </tr>
                       </thead>
                       <tbody>
                         {results.map((result) => (
-                          <tr key={result.id}>
+                          <tr key={result.id} className={result.isCompleted ? 'completed' : ''}>
                             <td>{result.content}</td>
                             <td>{result.subject}</td>
                             <td>{result.course}</td>
                             <td>{result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</td>
-                            <td>{result.processedAt ? new Date(result.processedAt).toLocaleString() : '未知'}</td>
+                            <td>
+                              <span className={`difficulty-badge ${result.difficulty}`}>
+                                {result.difficulty === 'easy' ? '简单' :
+                                 result.difficulty === 'medium' ? '中等' :
+                                 result.difficulty === 'hard' ? '困难' : '未设置'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`status-badge ${result.isCompleted ? 'completed' : 'pending'}`}>
+                                {result.isCompleted ? '已完成' : '未完成'}
+                              </span>
+                            </td>
+                            <td>{result.score !== null ? result.score : '未评分'}</td>
+                            <td>{result.timeSpent !== null ? `${result.timeSpent}分钟` : '未记录'}</td>
                             <td>{result.provider ? getProviderDisplayName(result.provider as LLMProvider) : '机器处理'}</td>
+                            <td>{result.createdAt ? new Date(result.createdAt).toLocaleString() : '未知'}</td>
                             <td>
                               <div className="action-buttons">
                                 <button 

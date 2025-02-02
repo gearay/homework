@@ -597,6 +597,61 @@ button:focus-visible {
   height: fit-content;
 }
 
+/* 作业表格样式增强 */
+.homework-table tr.completed {
+  background-color: rgba(0, 128, 0, 0.05);
+}
+
+.difficulty-badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.difficulty-badge.easy {
+  background-color: #e6f4ea;
+  color: #1e8e3e;
+}
+
+.difficulty-badge.medium {
+  background-color: #fff3e0;
+  color: #f57c00;
+}
+
+.difficulty-badge.hard {
+  background-color: #fce4ec;
+  color: #c2185b;
+}
+
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+.status-badge.completed {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.status-badge.pending {
+  background-color: #fff3e0;
+  color: #ef6c00;
+}
+
+/* 表格响应式优化 */
+@media screen and (max-width: 1200px) {
+  .homework-table {
+    overflow-x: auto;
+  }
+  
+  .homework-table table {
+    min-width: 1000px;
+  }
+}
+
 /* 表格样式 */
 .homework-table {
   width: 100%;
