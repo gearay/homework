@@ -1172,3 +1172,124 @@ button:focus-visible {
   padding: 40px;
   color: #666;
 }
+
+/* 编辑作业表单样式 */
+.edit-homework-form {
+  background: white;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  max-width: 800px;
+  margin: 20px auto;
+}
+
+.edit-homework-form h2 {
+  margin-bottom: 24px;
+  color: #333;
+  border-bottom: 2px solid #f0f0f0;
+  padding-bottom: 12px;
+}
+
+.edit-homework-form .form-group {
+  margin-bottom: 20px;
+}
+
+.edit-homework-form label {
+  display: block;
+  margin-bottom: 8px;
+  color: #555;
+  font-weight: 500;
+}
+
+.edit-homework-form input[type="text"],
+.edit-homework-form input[type="date"],
+.edit-homework-form input[type="number"],
+.edit-homework-form select,
+.edit-homework-form textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.edit-homework-form textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.edit-homework-form input:focus,
+.edit-homework-form select:focus,
+.edit-homework-form textarea:focus {
+  border-color: #4a90e2;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.2);
+}
+
+.edit-homework-form .checkbox {
+  display: flex;
+  align-items: center;
+}
+
+.edit-homework-form .checkbox label {
+  margin-bottom: 0;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+.edit-homework-form .checkbox input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin-right: 8px;
+}
+
+.edit-homework-form .form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.edit-homework-form .save-button,
+.edit-homework-form .cancel-button {
+  padding: 10px 24px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.edit-homework-form .save-button {
+  background-color: #4a90e2;
+  color: white;
+}
+
+.edit-homework-form .save-button:hover {
+  background-color: #357abd;
+}
+
+.edit-homework-form .cancel-button {
+  background-color: #f5f5f5;
+  color: #666;
+}
+
+.edit-homework-form .cancel-button:hover {
+  background-color: #e0e0e0;
+}
+
+@media (max-width: 768px) {
+  .edit-homework-form {
+    margin: 10px;
+    padding: 16px;
+  }
+  
+  .edit-homework-form .form-actions {
+    flex-direction: column;
+  }
+  
+  .edit-homework-form .save-button,
+  .edit-homework-form .cancel-button {
+    width: 100%;
+  }
+}

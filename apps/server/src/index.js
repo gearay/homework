@@ -1151,6 +1151,12 @@ app.get('/results', authenticateToken, async (req, res) => {
       suggestions: result.suggestions,
       provider: result.provider,
       processedAt: result.processedAt,
+      difficulty: result.difficulty,
+      isCompleted: result.isCompleted,
+      score: result.score,
+      timeSpent: result.timeSpent,
+      completedAt: result.completedAt,
+      status: result.status,
       createdAt: result.createdAt,
       updatedAt: result.updatedAt
     }));
@@ -1210,12 +1216,11 @@ app.put('/results/:id', authenticateToken, async (req, res) => {
           subject: subject || '',
           course: course || '',
           dueDate: dueDate || null,
-          dueDateConfidence: updateData.dueDateConfidence,
-          dueDateOriginal: updateData.dueDateOriginal,
-          confidence: updateData.confidence,
-          suggestions: updateData.suggestions || [],
-          provider: updateData.provider || existingRecord.provider,
-          processedAt: updateData.processedAt || existingRecord.processedAt || now,
+          difficulty: updateData.difficulty || existingRecord.difficulty || 'medium',
+          isCompleted: updateData.isCompleted || false,
+          score: updateData.score || null,
+          timeSpent: updateData.timeSpent || null,
+          completedAt: updateData.isCompleted ? now : null,
           updatedAt: now
         }
       }
@@ -1225,8 +1230,8 @@ app.put('/results/:id', authenticateToken, async (req, res) => {
       throw new Error('更新失败');
     }
 
-      res.json({
-        success: true,
+    res.json({
+      success: true,
       message: '更新成功'
     });
   } catch (error) {

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import './App.css'
 import Statistics from './components/Statistics'
+import EditHomework from './components/EditHomework'
 
 enum LLMProvider {
   DEEPSEEK = 'deepseek',
@@ -89,6 +90,7 @@ function App() {
   const [results, setResults] = useState<ProcessedResult[]>([])
   const [currentPage, setCurrentPage] = useState<Page>(Page.INPUT)
   const [users, setUsers] = useState<User[]>([])
+  const [editingHomework, setEditingHomework] = useState<ProcessedResult | null>(null)
 
   // 检查登录状态
   useEffect(() => {
@@ -118,8 +120,9 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         if (data.success && Array.isArray(data.data)) {
+          console.log('获取到的原始数据:', data.data);
           setResults(data.data);
-          console.log('获取历史记录成功:', data.data);
+          console.log('设置到state的数据:', data.data);
         } else {
           throw new Error(data.message || '获取历史记录失败');
         }
@@ -601,6 +604,45 @@ function App() {
     } catch (error) {
       console.error('密码修改失败:', error);
       setErrorMessage(error instanceof Error ? error.message : '密码修改失败');
+    }
+  };
+
+  const handleUpdateHomework = async (updatedHomework: ProcessedResult) => {
+    try {
+      console.log('正在更新作业:', updatedHomework);
+
+      const response = await fetch(`${API_BASE_URL}/results/${updatedHomework.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          content: updatedHomework.content,
+          subject: updatedHomework.subject,
+          course: updatedHomework.course,
+          dueDate: updatedHomework.dueDate,
+          difficulty: updatedHomework.difficulty,
+          isCompleted: updatedHomework.isCompleted,
+          score: updatedHomework.score,
+          timeSpent: updatedHomework.timeSpent
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || '更新作业失败');
+      }
+
+      const data = await response.json();
+      console.log('更新响应数据:', data);
+
+      setErrorMessage('作业更新成功');
+      setEditingHomework(null);
+      await fetchResults(); // 刷新列表
+    } catch (error) {
+      console.error('更新作业失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '更新作业失败');
     }
   };
 
@@ -1105,82 +1147,83 @@ function App() {
 
             {currentPage === Page.VIEW && (
               <div className="view-page">
-                <h2>作业记录</h2>
                 {errorMessage && (
-                  <div className="error-message">
-                    {errorMessage}
-                  </div>
+                  <div className="error-message">{errorMessage}</div>
                 )}
-                {results.length === 0 ? (
-                  <div className="empty-message">
-                    暂无作业记录
-                  </div>
+                {editingHomework ? (
+                  <EditHomework
+                    homework={editingHomework}
+                    onSave={handleUpdateHomework}
+                    onCancel={() => setEditingHomework(null)}
+                  />
                 ) : (
-                  <div className="homework-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>作业内容</th>
-                          <th>学科</th>
-                          <th>课程</th>
-                          <th>截止日期</th>
-                          <th>难度</th>
-                          <th>状态</th>
-                          <th>分数</th>
-                          <th>用时</th>
-                          <th>处理方式</th>
-                          <th>创建时间</th>
-                          <th>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {results.map((result) => (
-                          <tr key={result.id} className={result.isCompleted ? 'completed' : ''}>
-                            <td>{result.content}</td>
-                            <td>{result.subject}</td>
-                            <td>{result.course}</td>
-                            <td>{result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</td>
-                            <td>
-                              <span className={`difficulty-badge ${result.difficulty}`}>
-                                {result.difficulty === 'easy' ? '简单' :
-                                 result.difficulty === 'medium' ? '中等' :
-                                 result.difficulty === 'hard' ? '困难' : '未设置'}
-                              </span>
-                            </td>
-                            <td>
-                              <span className={`status-badge ${result.isCompleted ? 'completed' : 'pending'}`}>
-                                {result.isCompleted ? '已完成' : '未完成'}
-                              </span>
-                            </td>
-                            <td>{result.score !== null ? result.score : '未评分'}</td>
-                            <td>{result.timeSpent !== null ? `${result.timeSpent}分钟` : '未记录'}</td>
-                            <td>{result.provider ? getProviderDisplayName(result.provider as LLMProvider) : '机器处理'}</td>
-                            <td>{result.createdAt ? new Date(result.createdAt).toLocaleString() : '未知'}</td>
-                            <td>
-                              <div className="action-buttons">
-                                <button 
-                                  onClick={() => {
-                                    setResult(result);
-                                    setIsEditing(true);
-                                    setCurrentPage(Page.INPUT);
-                                  }}
-                                  className="edit-button"
-                                >
-                                  编辑
-                                </button>
-                                <button 
-                                  onClick={() => result.id && handleDelete(result.id)}
-                                  className="delete-button"
-                                >
-                                  删除
-                                </button>
-                              </div>
-                            </td>
+                  results.length === 0 ? (
+                    <div className="empty-message">
+                      暂无作业记录
+                    </div>
+                  ) : (
+                    <div className="homework-table">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>作业内容</th>
+                            <th>学科</th>
+                            <th>课程</th>
+                            <th>截止日期</th>
+                            <th>难度</th>
+                            <th>状态</th>
+                            <th>分数</th>
+                            <th>用时</th>
+                            <th>处理方式</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody>
+                          {results.map((result) => (
+                            <tr key={result.id} className={result.isCompleted ? 'completed' : ''}>
+                              <td>{result.content}</td>
+                              <td>{result.subject}</td>
+                              <td>{result.course}</td>
+                              <td>{result.dueDate ? new Date(result.dueDate).toLocaleString() : '未设置'}</td>
+                              <td>
+                                <span className={`difficulty-badge ${result.difficulty || 'medium'}`}>
+                                  {result.difficulty === 'easy' ? '简单' :
+                                   result.difficulty === 'medium' ? '中等' :
+                                   result.difficulty === 'hard' ? '困难' : '未设置'}
+                                </span>
+                              </td>
+                              <td>
+                                <span className={`status-badge ${result.isCompleted ? 'completed' : 'pending'}`}>
+                                  {result.isCompleted ? '已完成' : '未完成'}
+                                </span>
+                              </td>
+                              <td>{result.score !== null && result.score !== undefined ? result.score : '未评分'}</td>
+                              <td>{result.timeSpent !== null && result.timeSpent !== undefined ? `${result.timeSpent}分钟` : '未记录'}</td>
+                              <td>{result.provider ? getProviderDisplayName(result.provider as LLMProvider) : '机器处理'}</td>
+                              <td>{result.createdAt ? new Date(result.createdAt).toLocaleString() : '未知'}</td>
+                              <td>
+                                <div className="action-buttons">
+                                  <button 
+                                    onClick={() => setEditingHomework(result)}
+                                    className="edit-button"
+                                  >
+                                    编辑
+                                  </button>
+                                  <button 
+                                    onClick={() => result.id && handleDelete(result.id)}
+                                    className="delete-button"
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
                 )}
               </div>
             )}
