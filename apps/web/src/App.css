@@ -588,8 +588,6 @@ button:focus-visible {
 .input-page,
 .view-page,
 .manage-page {
-  max-width: 1200px;
-  margin: 0 auto;
   background-color: #ffffff;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -656,29 +654,26 @@ button:focus-visible {
 .homework-table {
   width: 100%;
   overflow-x: auto;
-  margin-top: 20px;
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .homework-table table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 800px;
+  text-align: left;
 }
 
 .homework-table th,
 .homework-table td {
-  padding: 12px 15px;
-  text-align: left;
-  border-bottom: 1px solid #e0e0e0;
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  line-height: 1.2;
+  font-size: 14px;
 }
 
 .homework-table th {
-  background-color: #f5f5f5;
+  background-color: #f8f9fa;
   font-weight: 600;
-  color: #333;
+  padding: 6px 12px;
 }
 
 .homework-table tr:hover {
@@ -700,18 +695,21 @@ button:focus-visible {
 }
 
 /* 内容列宽度限制 */
-.homework-table td:first-child {
-  max-width: 300px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.homework-table td {
+  vertical-align: middle;
+  line-height: 1.4;
+  padding: 8px 15px;
+  height: 48px;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 /* 管理页面样式 */
 .manage-page {
   padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .manage-section {
@@ -881,7 +879,7 @@ button:focus-visible {
 .action-buttons {
   display: flex;
   gap: 0.5rem;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   height: 32px;
 }
@@ -913,15 +911,14 @@ button:focus-visible {
 }
 
 .delete-button {
-  background-color: transparent;
-  color: #dc3545;
-  border: 1px solid #dc3545;
+  background-color: #f44336 !important;  /* 红色填充 */
+  color: white !important;
+  border: none !important;
 }
 
 .delete-button:hover {
-  background-color: rgba(220, 53, 69, 0.1);
-  color: #dc3545;
-  border-color: #dc3545;
+  background-color: #d32f2f !important;  /* 深红色 */
+  opacity: 0.9;
 }
 
 /* 表格单元格样式优化 */
@@ -1068,8 +1065,7 @@ button:focus-visible {
 /* 统计页面样式 */
 .statistics-container {
   padding: 20px;
-  max-width: 1200px;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .statistics-section {
@@ -1179,8 +1175,7 @@ button:focus-visible {
   padding: 24px;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  max-width: 800px;
-  margin: 20px auto;
+  margin: 20px 0;
 }
 
 .edit-homework-form h2 {
@@ -1292,4 +1287,112 @@ button:focus-visible {
   .edit-homework-form .cancel-button {
     width: 100%;
   }
+}
+
+.app-container {
+  padding: 20px;
+  min-height: 100vh;
+  background-color: #f5f5f5;
+}
+
+.content-container {
+  padding: 20px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.homework-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.homework-table table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.homework-table th,
+.homework-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #eee;
+  line-height: 1.2;
+  font-size: 14px;
+}
+
+.homework-table th {
+  background-color: #f8f9fa;
+  font-weight: 600;
+  padding: 6px 12px;
+}
+
+.button-group {
+  display: flex;
+  gap: 4px;
+}
+
+.button-group button {
+  padding: 4px 8px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  font-size: 13px;
+  min-height: 24px;
+}
+
+.button-group button:first-child {
+  background-color: #4CAF50;
+  color: white;
+}
+
+.button-group button:last-child {
+  background-color: #f44336 !important;  /* 红色填充 */
+  color: white !important;
+  border: none !important;
+}
+
+.button-group button:hover {
+  opacity: 0.9;
+}
+
+/* 表格操作列样式 */
+.homework-table td:first-child {
+  text-align: left;
+  padding-left: 12px;
+  width: 120px;
+}
+
+.homework-table .button-group {
+  justify-content: flex-start;
+  margin: 0;
+}
+
+/* 调整表格内容列的宽度 */
+.homework-table td:nth-child(2) {
+  max-width: 300px;
+}
+
+.homework-table td:nth-child(3),
+.homework-table td:nth-child(4) {
+  max-width: 100px;
+}
+
+.homework-table td:nth-child(5) {
+  width: 100px;
+  white-space: nowrap;
+}
+
+.homework-table td:nth-child(6),
+.homework-table td:nth-child(7),
+.homework-table td:nth-child(8),
+.homework-table td:nth-child(9) {
+  width: 80px;
+  white-space: nowrap;
+}
+
+.homework-table td:last-child {
+  width: 150px;
+  white-space: nowrap;
 }
