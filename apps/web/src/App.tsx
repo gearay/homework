@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import './App.css'
+import Statistics from './components/Statistics'
 
 enum LLMProvider {
   DEEPSEEK = 'deepseek',
@@ -55,7 +56,8 @@ const API_BASE_URL = 'http://localhost:3000';
 enum Page {
   INPUT = 'input',
   VIEW = 'view',
-  MANAGE = 'manage'
+  MANAGE = 'manage',
+  STATISTICS = 'statistics'
 }
 
 function App() {
@@ -805,6 +807,13 @@ function App() {
               📋 查看
             </button>
             <button 
+              className={`nav-button ${currentPage === Page.STATISTICS ? 'active' : ''}`}
+              onClick={() => setCurrentPage(Page.STATISTICS)}
+              data-page="statistics"
+            >
+              📊 统计
+            </button>
+            <button 
               className={`nav-button ${currentPage === Page.MANAGE ? 'active' : ''}`}
               onClick={() => setCurrentPage(Page.MANAGE)}
               data-page="manage"
@@ -1150,6 +1159,7 @@ function App() {
             )}
 
             {currentPage === Page.MANAGE && renderUserManagement()}
+            {currentPage === Page.STATISTICS && <Statistics />}
           </div>
         )}
       </div>

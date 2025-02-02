@@ -1312,7 +1312,15 @@ app.post('/save', authenticateToken, async (req, res) => {
       provider: req.body.provider || 'machine',
       processedAt: req.body.processedAt || now,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      // 添加统计所需的额外字段
+      status: 'active',
+      isCompleted: false,
+      completedAt: null,
+      score: null,
+      difficulty: req.body.difficulty || 'medium',
+      timeSpent: null,
+      category: req.body.category || 'homework'
     };
 
     console.log('准备保存的文档:', JSON.stringify(resultDoc, null, 2));
@@ -1440,6 +1448,179 @@ app.post('/user/change-password', authenticateToken, async (req, res) => {
     res.status(500).json({
       success: false,
       message: '修改密码失败，请重试'
+    });
+  }
+});
+
+// 获取用户作业统计数据
+app.get('/api/statistics', authenticateToken, async (req, res) => {
+  try {
+    const userId = new ObjectId(req.user.id);
+    
+    // 使用聚合管道获取统计数据
+    const stats = await db.collection('results').aggregate([
+      { $match: { userId: userId } },
+      {
+        $group: {
+          _id: null,
+          totalHomework: { $sum: 1 },  // 作业总数
+          subjectCount: { $addToSet: "$subject" },  // 不同学科数量
+          averageConfidence: { $avg: "$confidence" },  // 平均置信度
+          completedCount: {  // 已完成作业数量
+            $sum: { $cond: ["$isCompleted", 1, 0] }
+          },
+          averageScore: {  // 平均分数
+            $avg: { $cond: [{ $ne: ["$score", null] }, "$score", null] }
+          },
+          byDifficulty: {  // 按难度分组
+            $push: {
+              difficulty: "$difficulty",
+              count: 1
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          totalHomework: 1,
+          subjectCount: { $size: "$subjectCount" },
+          averageConfidence: { $round: ["$averageConfidence", 2] },
+          completedCount: 1,
+          completionRate: {
+            $round: [{ $multiply: [{ $divide: ["$completedCount", "$totalHomework"] }, 100] }, 2]
+          },
+          averageScore: { $round: ["$averageScore", 2] },
+          byDifficulty: 1
+        }
+      }
+    ]).toArray();
+
+    // 获取最近7天的作业趋势
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const dailyTrend = await db.collection('results').aggregate([
+      {
+        $match: {
+          userId: userId,
+          createdAt: { $gte: sevenDaysAgo.toISOString() }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: { $toDate: "$createdAt" } }
+          },
+          count: { $sum: 1 },
+          completedCount: {
+            $sum: { $cond: ["$isCompleted", 1, 0] }
+          },
+          averageConfidence: { $avg: "$confidence" }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          date: "$_id",
+          count: 1,
+          completedCount: 1,
+          averageConfidence: { $round: ["$averageConfidence", 2] }
+        }
+      },
+      { $sort: { "_id": 1 } }
+    ]).toArray();
+
+    // 按学科分类统计
+    const subjectStats = await db.collection('results').aggregate([
+      {
+        $match: { userId: userId }
+      },
+      {
+        $group: {
+          _id: "$subject",
+          count: { $sum: 1 },
+          completedCount: {
+            $sum: { $cond: ["$isCompleted", 1, 0] }
+          },
+          averageConfidence: { $avg: "$confidence" },
+          averageScore: {
+            $avg: { $cond: [{ $ne: ["$score", null] }, "$score", null] }
+          }
+        }
+      },
+      {
+        $project: {
+          subject: { $ifNull: ["$_id", "未分类"] },
+          count: 1,
+          completedCount: 1,
+          completionRate: {
+            $round: [{ $multiply: [{ $divide: ["$completedCount", "$count"] }, 100] }, 2]
+          },
+          averageConfidence: { $round: ["$averageConfidence", 2] },
+          averageScore: { $round: ["$averageScore", 2] },
+          _id: 0
+        }
+      },
+      { $sort: { count: -1 } }
+    ]).toArray();
+
+    // 按难度分类统计
+    const difficultyStats = await db.collection('results').aggregate([
+      {
+        $match: { userId: userId }
+      },
+      {
+        $group: {
+          _id: "$difficulty",
+          count: { $sum: 1 },
+          completedCount: {
+            $sum: { $cond: ["$isCompleted", 1, 0] }
+          },
+          averageScore: {
+            $avg: { $cond: [{ $ne: ["$score", null] }, "$score", null] }
+          }
+        }
+      },
+      {
+        $project: {
+          difficulty: { $ifNull: ["$_id", "未设置"] },
+          count: 1,
+          completedCount: 1,
+          completionRate: {
+            $round: [{ $multiply: [{ $divide: ["$completedCount", "$count"] }, 100] }, 2]
+          },
+          averageScore: { $round: ["$averageScore", 2] },
+          _id: 0
+        }
+      },
+      { $sort: { count: -1 } }
+    ]).toArray();
+
+    // 合并所有统计数据
+    const statistics = {
+      overview: stats[0] || {
+        totalHomework: 0,
+        subjectCount: 0,
+        averageConfidence: 0,
+        completedCount: 0,
+        completionRate: 0,
+        averageScore: 0
+      },
+      dailyTrend: dailyTrend,
+      subjectStats: subjectStats,
+      difficultyStats: difficultyStats
+    };
+
+    res.json({
+      success: true,
+      data: statistics
+    });
+  } catch (error) {
+    console.error('获取统计数据错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取统计数据失败'
     });
   }
 });
