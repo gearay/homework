@@ -30,10 +30,16 @@ interface ApiResponse {
 }
 
 interface User {
+  _id: string
   username: string
+  isAdmin: boolean
+  status: string
   apiKeys: {
     [key in LLMProvider]: string
   }
+  createdAt: string
+  lastLoginAt: string | null
+  homeworkCount?: number
 }
 
 interface AuthResponse {
@@ -71,6 +77,7 @@ function App() {
   const [password, setPassword] = useState('')
   const [results, setResults] = useState<ProcessedResult[]>([])
   const [currentPage, setCurrentPage] = useState<Page>(Page.INPUT)
+  const [users, setUsers] = useState<User[]>([])
 
   // 检查登录状态
   useEffect(() => {
@@ -454,6 +461,199 @@ function App() {
     } finally {
       setProcessing(false);
     }
+  };
+
+  // 获取用户列表
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/users`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && Array.isArray(data.data)) {
+          setUsers(data.data);
+        } else {
+          throw new Error(data.message || '获取用户列表失败');
+        }
+      } else {
+        throw new Error('获取用户列表失败');
+      }
+    } catch (error) {
+      console.error('获取用户列表失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '获取用户列表失败');
+    }
+  };
+
+  // 在用户登录后获取用户列表
+  useEffect(() => {
+    if (isLoggedIn && user?.isAdmin) {
+      fetchUsers();
+    }
+  }, [isLoggedIn, user?.isAdmin]);
+
+  // 更新用户状态
+  const updateUserStatus = async (userId: string, status: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/users/${userId}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ status })
+      });
+
+      if (response.ok) {
+        await fetchUsers(); // 重新获取用户列表
+        setErrorMessage('用户状态更新成功');
+      } else {
+        const data = await response.json();
+        throw new Error(data.message || '更新用户状态失败');
+      }
+    } catch (error) {
+      console.error('更新用户状态失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '更新用户状态失败');
+    }
+  };
+
+  // 设置/取消管理员权限
+  const updateUserAdmin = async (userId: string, isAdmin: boolean) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/users/${userId}/admin`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ isAdmin })
+      });
+
+      if (response.ok) {
+        await fetchUsers(); // 重新获取用户列表
+        setErrorMessage(`${isAdmin ? '设置' : '取消'}管理员权限成功`);
+      } else {
+        const data = await response.json();
+        throw new Error(data.message || '更新管理员权限失败');
+      }
+    } catch (error) {
+      console.error('更新管理员权限失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '更新管理员权限失败');
+    }
+  };
+
+  // 重置用户密码
+  const resetUserPassword = async (userId: string, newPassword: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ newPassword })
+      });
+
+      if (response.ok) {
+        setErrorMessage('密码重置成功');
+      } else {
+        const data = await response.json();
+        throw new Error(data.message || '重置密码失败');
+      }
+    } catch (error) {
+      console.error('重置密码失败:', error);
+      setErrorMessage(error instanceof Error ? error.message : '重置密码失败');
+    }
+  };
+
+  // 渲染用户管理界面
+  const renderUserManagement = () => {
+    if (!user?.isAdmin) return null;
+
+    return (
+      <div className="manage-page">
+        {/* API密钥管理部分 */}
+        <div className="manage-section">
+          <h2>API密钥管理</h2>
+          <div className="api-keys-grid">
+            {Object.values(LLMProvider).map((provider) => (
+              <div key={provider} className="api-key-item">
+                <label>{getProviderDisplayName(provider)} API Key:</label>
+                <input
+                  type="password"
+                  value={user?.apiKeys?.[provider] || ''}
+                  onChange={(e) => updateApiKey(provider, e.target.value)}
+                  placeholder={`输入${getProviderDisplayName(provider)} API Key`}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 用户管理部分 */}
+        <div className="manage-section">
+          <h2>用户管理</h2>
+          <div className="table-container">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>用户名</th>
+                  <th>API配置状态</th>
+                  <th>作业数量</th>
+                  <th>管理员</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(user => (
+                  <tr key={user.username}>
+                    <td>{user.username}</td>
+                    <td>{Object.values(user.apiKeys).some(key => key && key.length > 0) ? '已配置' : '未配置'}</td>
+                    <td>{user.homeworkCount || 0}</td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={user.isAdmin}
+                        onChange={(e) => updateUserAdmin(user._id, e.target.checked)}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={user.status}
+                        onChange={(e) => updateUserStatus(user._id, e.target.value)}
+                        className="status-select"
+                      >
+                        <option value="active">启用</option>
+                        <option value="disabled">禁用</option>
+                      </select>
+                    </td>
+                    <td>
+                      <button 
+                        onClick={() => {
+                          const newPassword = prompt('请输入新密码（至少6个字符）');
+                          if (newPassword && newPassword.length >= 6) {
+                            resetUserPassword(user._id, newPassword);
+                          } else if (newPassword) {
+                            alert('密码长度不能少于6个字符');
+                          }
+                        }}
+                        className="action-button"
+                      >
+                        重置密码
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -843,31 +1043,7 @@ function App() {
               </div>
             )}
 
-            {currentPage === Page.MANAGE && (
-              <div className="manage-page">
-                <div className="api-keys-section">
-                  <h3>API密钥管理</h3>
-                  {errorMessage && (
-                    <div className="error-message">
-                      {errorMessage}
-                    </div>
-                  )}
-                  <div className="api-keys-grid">
-                    {Object.values(LLMProvider).map((provider) => (
-                      <div key={provider} className="api-key-item">
-                        <label>{getProviderDisplayName(provider)} API Key:</label>
-                        <input
-                          type="password"
-                          value={user?.apiKeys?.[provider] || ''}
-                          onChange={(e) => updateApiKey(provider, e.target.value)}
-                          placeholder={`输入${getProviderDisplayName(provider)} API Key`}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
+            {currentPage === Page.MANAGE && renderUserManagement()}
           </div>
         )}
       </div>

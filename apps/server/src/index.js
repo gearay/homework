@@ -50,7 +50,8 @@ async function connectDB() {
     // 创建必要的索引
     console.log('创建索引...');
     await db.collection('users').createIndex({ username: 1 }, { unique: true });
-    await db.collection('results').createIndex({ userId: 1 });
+    await db.collection('results').createIndex({ userId: 1 }); // 为作业数量统计创建索引
+    await db.collection('results').createIndex({ userId: 1, createdAt: -1 }); // 为按时间排序的查询创建复合索引
     console.log('索引创建完成');
 
     // 检查users集合是否存在
@@ -141,6 +142,194 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
+// 管理员验证中间件
+const isAdmin = async (req, res, next) => {
+  try {
+    const user = await db.collection('users').findOne({ 
+      _id: new ObjectId(req.user.id) 
+    });
+
+    if (!user || !user.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: '需要管理员权限'
+      });
+    }
+    next();
+  } catch (error) {
+    console.error('管理员验证错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '服务器错误'
+    });
+  }
+};
+
+// 获取用户列表（仅管理员可访问）
+app.get('/api/users', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    // 首先获取所有用户的基本信息
+    const users = await db.collection('users').find({}, {
+      projection: {
+        password: 0 // 不返回密码字段
+      }
+    }).toArray();
+
+    // 使用聚合管道获取每个用户的作业数量
+    const userHomeworkCounts = await db.collection('results').aggregate([
+      {
+        $group: {
+          _id: '$userId',
+          homeworkCount: { $sum: 1 }
+        }
+      }
+    ]).toArray();
+
+    // 创建一个用户ID到作业数量的映射
+    const homeworkCountMap = new Map(
+      userHomeworkCounts.map(item => [item._id.toString(), item.homeworkCount])
+    );
+
+    // 合并用户信息和作业数量
+    const usersWithStats = users.map(user => ({
+      ...user,
+      homeworkCount: homeworkCountMap.get(user._id.toString()) || 0,
+      apiKeysConfigured: Object.values(user.apiKeys).some(key => key && key.length > 0)
+    }));
+
+    console.log('用户统计信息:', usersWithStats.map(user => ({
+      username: user.username,
+      homeworkCount: user.homeworkCount,
+      apiKeysConfigured: user.apiKeysConfigured
+    })));
+
+    res.json({
+      success: true,
+      data: usersWithStats
+    });
+  } catch (error) {
+    console.error('获取用户列表错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '获取用户列表失败'
+    });
+  }
+});
+
+// 更新用户状态（仅管理员可访问）
+app.put('/api/users/:userId/status', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { status } = req.body;
+
+    if (!['active', 'disabled'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: '无效的状态值'
+      });
+    }
+
+    const result = await db.collection('users').updateOne(
+      { _id: new ObjectId(userId) },
+      { 
+        $set: { 
+          status: status,
+          isDisabled: status === 'disabled',
+          updatedAt: new Date().toISOString()
+        } 
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: '用户状态更新成功'
+    });
+  } catch (error) {
+    console.error('更新用户状态错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '更新用户状态失败'
+    });
+  }
+});
+
+// 设置/取消管理员权限（仅管理员可访问）
+app.put('/api/users/:userId/admin', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { isAdmin: setAdmin } = req.body;
+
+    const result = await db.collection('users').updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { isAdmin: setAdmin } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: `${setAdmin ? '设置' : '取消'}管理员权限成功`
+    });
+  } catch (error) {
+    console.error('更新管理员权限错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '更新管理员权限失败'
+    });
+  }
+});
+
+// 重置用户密码（仅管理员可访问）
+app.post('/api/users/:userId/reset-password', authenticateToken, isAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: '新密码长度不能少于6个字符'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const result = await db.collection('users').updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { password: hashedPassword } }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: '用户不存在'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: '密码重置成功'
+    });
+  } catch (error) {
+    console.error('重置密码错误:', error);
+    res.status(500).json({
+      success: false,
+      message: '重置密码失败'
+    });
+  }
+});
+
 // 用户注册
 app.post('/auth/register', async (req, res) => {
   try {
@@ -187,12 +376,15 @@ app.post('/auth/register', async (req, res) => {
     const user = {
       username,
       password: hashedPassword,
+      isAdmin: false,
+      status: 'active',
       apiKeys: {
         openai: '',
         deepseek: '',
         doubao: ''
       },
-      createdAt: new Date()
+      createdAt: new Date(),
+      lastLoginAt: null
     };
 
     const result = await db.collection('users').insertOne(user);
@@ -233,11 +425,24 @@ app.post('/auth/login', async (req, res) => {
     // 查找用户
     const user = await db.collection('users').findOne({ username });
     console.log('查找用户结果:', user ? '用户存在' : '用户不存在');
+    console.log('用户详情:', {
+      username: user?.username,
+      isAdmin: user?.isAdmin,
+      status: user?.status
+    });
     
     if (!user) {
       return res.status(401).json({ 
         success: false,
         message: '用户名或密码错误' 
+      });
+    }
+
+    // 检查用户状态
+    if (user.isDisabled || user.status === 'disabled') {
+      return res.status(401).json({
+        success: false,
+        message: '账户已被禁用，请联系管理员'
       });
     }
 
@@ -252,21 +457,50 @@ app.post('/auth/login', async (req, res) => {
       });
     }
 
-    // 生成JWT令牌
+    // 更新最后登录时间和确保状态字段一致
+    await db.collection('users').updateOne(
+      { _id: user._id },
+      { 
+        $set: { 
+          lastLoginAt: new Date(),
+          status: user.isDisabled ? 'disabled' : 'active',  // 添加status字段
+          isDisabled: user.status === 'disabled'  // 同步isDisabled字段
+        } 
+      }
+    );
+
+    // 生成JWT令牌，确保包含isAdmin信息
     const token = jwt.sign(
-      { id: user._id, username: user.username },
+      { 
+        id: user._id,
+        username: user.username,
+        isAdmin: user.isAdmin || false
+      },
       process.env.JWT_SECRET || 'your-secret-key',
       { expiresIn: '24h' }
     );
 
-    // 返回用户信息和API密钥
+    // 返回用户信息（不包含密码）
+    const userResponse = {
+      _id: user._id,
+      username: user.username,
+      isAdmin: user.isAdmin || false,
+      status: user.isDisabled ? 'disabled' : 'active',
+      apiKeys: user.apiKeys || {},
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt
+    };
+
+    console.log('登录成功，返回用户信息:', {
+      username: userResponse.username,
+      isAdmin: userResponse.isAdmin,
+      status: userResponse.status
+    });
+
     res.json({
       success: true,
       token,
-      user: {
-        username: user.username,
-        apiKeys: user.apiKeys
-      }
+      user: userResponse
     });
   } catch (error) {
     console.error('登录错误:', error);
