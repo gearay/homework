@@ -571,11 +571,11 @@ function App() {
 
   // 渲染用户管理界面
   const renderUserManagement = () => {
-    if (!user?.isAdmin) return null;
+    if (!user) return null;
 
     return (
       <div className="manage-page">
-        {/* API密钥管理部分 */}
+        {/* API密钥管理部分 - 所有用户都可见 */}
         <div className="manage-section">
           <h2>API密钥管理</h2>
           <div className="api-keys-grid">
@@ -593,65 +593,67 @@ function App() {
           </div>
         </div>
 
-        {/* 用户管理部分 */}
-        <div className="manage-section">
-          <h2>用户管理</h2>
-          <div className="table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>用户名</th>
-                  <th>API配置状态</th>
-                  <th>作业数量</th>
-                  <th>管理员</th>
-                  <th>状态</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(user => (
-                  <tr key={user.username}>
-                    <td>{user.username}</td>
-                    <td>{Object.values(user.apiKeys).some(key => key && key.length > 0) ? '已配置' : '未配置'}</td>
-                    <td>{user.homeworkCount || 0}</td>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={user.isAdmin}
-                        onChange={(e) => updateUserAdmin(user._id, e.target.checked)}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={user.status}
-                        onChange={(e) => updateUserStatus(user._id, e.target.value)}
-                        className="status-select"
-                      >
-                        <option value="active">启用</option>
-                        <option value="disabled">禁用</option>
-                      </select>
-                    </td>
-                    <td>
-                      <button 
-                        onClick={() => {
-                          const newPassword = prompt('请输入新密码（至少6个字符）');
-                          if (newPassword && newPassword.length >= 6) {
-                            resetUserPassword(user._id, newPassword);
-                          } else if (newPassword) {
-                            alert('密码长度不能少于6个字符');
-                          }
-                        }}
-                        className="action-button"
-                      >
-                        重置密码
-                      </button>
-                    </td>
+        {/* 用户管理部分 - 仅管理员可见 */}
+        {user.isAdmin && (
+          <div className="manage-section">
+            <h2>用户管理</h2>
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>用户名</th>
+                    <th>API配置状态</th>
+                    <th>作业数量</th>
+                    <th>管理员</th>
+                    <th>状态</th>
+                    <th>操作</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {users.map(user => (
+                    <tr key={user.username}>
+                      <td>{user.username}</td>
+                      <td>{Object.values(user.apiKeys).some(key => key && key.length > 0) ? '已配置' : '未配置'}</td>
+                      <td>{user.homeworkCount || 0}</td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={user.isAdmin}
+                          onChange={(e) => updateUserAdmin(user._id, e.target.checked)}
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={user.status}
+                          onChange={(e) => updateUserStatus(user._id, e.target.value)}
+                          className="status-select"
+                        >
+                          <option value="active">启用</option>
+                          <option value="disabled">禁用</option>
+                        </select>
+                      </td>
+                      <td>
+                        <button 
+                          onClick={() => {
+                            const newPassword = prompt('请输入新密码（至少6个字符）');
+                            if (newPassword && newPassword.length >= 6) {
+                              resetUserPassword(user._id, newPassword);
+                            } else if (newPassword) {
+                              alert('密码长度不能少于6个字符');
+                            }
+                          }}
+                          className="action-button"
+                        >
+                          重置密码
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   };
